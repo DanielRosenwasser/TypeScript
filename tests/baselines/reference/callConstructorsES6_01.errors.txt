@@ -1,0 +1,17 @@
+tests/cases/conformance/es7/callConstructors/es6/callConstructorsES6_01.ts(10,10): error TS2348: Value of type 'typeof C' is not callable. Did you mean to include 'new'?
+
+
+==== tests/cases/conformance/es7/callConstructors/es6/callConstructorsES6_01.ts (1 errors) ====
+    
+    class C {
+        call constructor() {
+            let result = new C();
+            return result;
+        }
+    }
+    
+    let c1 = new C();
+    let c2 = C();
+             ~~~
+!!! error TS2348: Value of type 'typeof C' is not callable. Did you mean to include 'new'?
+    let eq = c1 === c2;

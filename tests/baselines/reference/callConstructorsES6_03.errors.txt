@@ -1,0 +1,29 @@
+tests/cases/conformance/es7/callConstructors/es6/callConstructorsES6_03.ts(15,10): error TS2346: Supplied parameters do not match any signature of call target.
+tests/cases/conformance/es7/callConstructors/es6/callConstructorsES6_03.ts(16,10): error TS2348: Value of type 'typeof C' is not callable. Did you mean to include 'new'?
+tests/cases/conformance/es7/callConstructors/es6/callConstructorsES6_03.ts(17,11): error TS2348: Value of type 'typeof C' is not callable. Did you mean to include 'new'?
+
+
+==== tests/cases/conformance/es7/callConstructors/es6/callConstructorsES6_03.ts (3 errors) ====
+    
+    class C {
+        call constructor(): C;
+        call constructor(x: number): C
+        call constructor(x?: number): any {
+            if (x !== undefined) {
+                return x;
+            }
+            
+            let result = new C(10);
+            return result;
+        }
+    }
+    
+    let c1 = new C(10);
+             ~~~~~~~~~
+!!! error TS2346: Supplied parameters do not match any signature of call target.
+    let c2 = C();
+             ~~~
+!!! error TS2348: Value of type 'typeof C' is not callable. Did you mean to include 'new'?
+    let num = C(100);
+              ~~~~~~
+!!! error TS2348: Value of type 'typeof C' is not callable. Did you mean to include 'new'?
