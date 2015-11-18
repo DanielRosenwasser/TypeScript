@@ -170,7 +170,8 @@ namespace ts {
         SymbolKeyword,
         TypeKeyword,
         FromKeyword,
-        OfKeyword, // LastKeyword and LastToken
+        OfKeyword,
+        CallKeyword, // LastKeyword and LastToken
 
         // Parse tree nodes
 
@@ -187,6 +188,7 @@ namespace ts {
         MethodSignature,
         MethodDeclaration,
         Constructor,
+        CallConstructor,
         GetAccessor,
         SetAccessor,
         CallSignature,
@@ -345,7 +347,7 @@ namespace ts {
         FirstReservedWord = BreakKeyword,
         LastReservedWord = WithKeyword,
         FirstKeyword = BreakKeyword,
-        LastKeyword = OfKeyword,
+        LastKeyword = CallKeyword,
         FirstFutureReservedWord = ImplementsKeyword,
         LastFutureReservedWord = YieldKeyword,
         FirstTypeNode = TypePredicate,
@@ -692,6 +694,13 @@ namespace ts {
 
     // @kind(SyntaxKind.Constructor)
     export interface ConstructorDeclaration extends FunctionLikeDeclaration, ClassElement {
+        _constructorBrand: any;
+        body?: FunctionBody;
+    }
+
+    // @kind(SyntaxKind.CallConstructor)
+    export interface CallConstructorDeclaration extends FunctionLikeDeclaration, ClassElement {
+        _callConstructorBrand: any;
         body?: FunctionBody;
     }
 

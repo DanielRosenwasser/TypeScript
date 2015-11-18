@@ -55,6 +55,7 @@ namespace ts {
         "as": SyntaxKind.AsKeyword,
         "boolean": SyntaxKind.BooleanKeyword,
         "break": SyntaxKind.BreakKeyword,
+        "call": SyntaxKind.CallKeyword,
         "case": SyntaxKind.CaseKeyword,
         "catch": SyntaxKind.CatchKeyword,
         "class": SyntaxKind.ClassKeyword,

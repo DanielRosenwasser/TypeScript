@@ -1148,6 +1148,9 @@ namespace ts {
                 nextToken();
                 return canFollowModifier();
             }
+            if (token === SyntaxKind.CallKeyword) {
+                return nextToken() === SyntaxKind.ConstructorKeyword;
+            }
 
             nextToken();
             if (scanner.hasPrecedingLineBreak()) {
@@ -1480,7 +1483,7 @@ namespace ts {
             }
 
             // Ok, we have a node that looks like it could be reused.  Now verify that it is valid
-            // in the currest list parsing context that we're currently at.
+            // in the list parsing context that we're currently at.
             if (!canReuseNode(node, parsingContext)) {
                 return undefined;
             }
@@ -1576,6 +1579,7 @@ namespace ts {
             if (node) {
                 switch (node.kind) {
                     case SyntaxKind.Constructor:
+                    case SyntaxKind.CallConstructor:
                     case SyntaxKind.IndexSignature:
                     case SyntaxKind.GetAccessor:
                     case SyntaxKind.SetAccessor:
@@ -1584,7 +1588,7 @@ namespace ts {
                         return true;
                     case SyntaxKind.MethodDeclaration:
                         // Method declarations are not necessarily reusable.  An object-literal
-                        // may have a method calls "constructor(...)" and we must reparse that
+                        // may have a method called "constructor(...)" and we must reparse that
                         // into an actual .ConstructorDeclaration.
                         let methodDeclaration = <MethodDeclaration>node;
                         let nameIsConstructor = methodDeclaration.name.kind === SyntaxKind.Identifier &&
@@ -4710,8 +4714,30 @@ namespace ts {
             return finishNode(node);
         }
 
-        function parseConstructorDeclaration(pos: number, decorators: NodeArray<Decorator>, modifiers: ModifiersArray): ConstructorDeclaration {
-            const node = <ConstructorDeclaration>createNode(SyntaxKind.Constructor, pos);
+        function parseConstructorDeclaration(fullStart: number, decorators: NodeArray<Decorator>, modifiers: ModifiersArray): ConstructorDeclaration {
+            const result = parseConstructorOrCallConstructorRest(SyntaxKind.Constructor, fullStart, decorators, modifiers);
+            return result as ConstructorDeclaration;
+        }
+
+        function tryParseCallConstructorDeclaration(fullStart: number, decorators: NodeArray<Decorator>, modifiers: ModifiersArray): CallConstructorDeclaration {
+            if (parseContextualModifier(SyntaxKind.CallKeyword)) {
+                const result = parseConstructorOrCallConstructorRest(SyntaxKind.CallConstructor, fullStart, decorators, modifiers);
+                return result as CallConstructorDeclaration;
+            }
+
+            return undefined;
+        }
+
+        /**
+         * Parses out a constructor or the rest of a call constructor.
+         *
+         * If parsing out a call constructor, it is assumed that this function
+         * proceeds *following* the 'call' keyword.
+         */
+        function parseConstructorOrCallConstructorRest(kind: SyntaxKind, fullStart: number, decorators: NodeArray<Decorator>, modifiers: ModifiersArray): ConstructorDeclaration | CallConstructorDeclaration {
+            Debug.assert(kind === SyntaxKind.Constructor || kind === SyntaxKind.CallConstructor);
+
+            const node = <ConstructorDeclaration | CallConstructorDeclaration>createNode(kind, fullStart);
             node.decorators = decorators;
             setModifiers(node, modifiers);
             parseExpected(SyntaxKind.ConstructorKeyword);
@@ -4828,10 +4854,21 @@ namespace ts {
             }
 
             // Try to get the first property-like token following all modifiers.
-            // This can either be an identifier or the 'get' or 'set' keywords.
+            // This can either be an identifier, the 'get'/'set' keywords, 'constructor', or 'call'.
             if (isLiteralPropertyName()) {
                 idToken = token;
                 nextToken();
+            }
+
+            // If this is a call keyword followed by a constructor, advance
+            // so that we behave the same as if we had a constructor.
+            // We don't have to worry about ASI because a syntactically invalid call constructor
+            // would be just as syntactically valid as a property and a constructor.
+            if (idToken === SyntaxKind.CallKeyword) {
+                if (token === SyntaxKind.ConstructorKeyword) {
+                    idToken = token;
+                    nextToken();
+                }
             }
 
             // Index signatures and computed properties are class members; we can parse.
@@ -4952,7 +4989,12 @@ namespace ts {
             }
 
             if (token === SyntaxKind.ConstructorKeyword) {
-                return parseConstructorDeclaration(fullStart, decorators, modifiers);
+                return parseConstructorOrCallConstructorRest(SyntaxKind.Constructor, fullStart, decorators, modifiers);
+            }
+
+            const callConstructor = tryParseCallConstructorDeclaration(fullStart, decorators, modifiers);
+            if (callConstructor) {
+                return callConstructor;
             }
 
             if (isIndexSignature()) {

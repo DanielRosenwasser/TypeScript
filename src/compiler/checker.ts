@@ -11137,6 +11137,10 @@ namespace ts {
             }
         }
 
+        function checkCallConstructorDeclaration(callConstructor: CallConstructorDeclaration) {
+            // TODO: Report error.
+        }
+
         function checkAccessorDeclaration(node: AccessorDeclaration) {
             if (produceDiagnostics) {
                 // Grammar checking accessors
@@ -14089,6 +14093,8 @@ namespace ts {
                     return checkMethodDeclaration(<MethodDeclaration>node);
                 case SyntaxKind.Constructor:
                     return checkConstructorDeclaration(<ConstructorDeclaration>node);
+                case SyntaxKind.CallConstructor:
+                    return checkCallConstructorDeclaration(<CallConstructorDeclaration>node);
                 case SyntaxKind.GetAccessor:
                 case SyntaxKind.SetAccessor:
                     return checkAccessorDeclaration(<AccessorDeclaration>node);
