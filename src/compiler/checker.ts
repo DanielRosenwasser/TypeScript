@@ -11138,7 +11138,7 @@ namespace ts {
         }
 
         function checkCallConstructorDeclaration(callConstructor: CallConstructorDeclaration) {
-            // TODO: Report error.
+            error(callConstructor, Diagnostics.Callable_classes_are_not_currently_supported);
         }
 
         function checkAccessorDeclaration(node: AccessorDeclaration) {
