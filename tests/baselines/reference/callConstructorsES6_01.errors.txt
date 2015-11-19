@@ -1,13 +1,19 @@
+tests/cases/conformance/es7/callConstructors/es6/callConstructorsES6_01.ts(3,5): error TS9003: Callable classes are not currently supported.
 tests/cases/conformance/es7/callConstructors/es6/callConstructorsES6_01.ts(10,10): error TS2348: Value of type 'typeof C' is not callable. Did you mean to include 'new'?
 
 
-==== tests/cases/conformance/es7/callConstructors/es6/callConstructorsES6_01.ts (1 errors) ====
+==== tests/cases/conformance/es7/callConstructors/es6/callConstructorsES6_01.ts (2 errors) ====
     
     class C {
         call constructor() {
+        ~~~~~~~~~~~~~~~~~~~~
             let result = new C();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             return result;
+    ~~~~~~~~~~~~~~~~~~~~~~
         }
+    ~~~~~
+!!! error TS9003: Callable classes are not currently supported.
     }
     
     let c1 = new C();
