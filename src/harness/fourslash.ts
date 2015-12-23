@@ -286,7 +286,7 @@ namespace FourSlash {
                     // Fourslash insert tests/cases/fourslash into inputFile.unitName and import statement doesn't require ".ts"
                     // so convert them before making appropriate comparison
                     const importedFilePath = this.basePath + "/" + importedFile.fileName;
-                    this.addMatchedInputFile(importedFilePath, compilationOptions.allowNonTsExtensions ? ts.supportedJsExtensions : ts.supportedExtensions);
+                    this.addMatchedInputFile(importedFilePath, ts.getSupportedExtensions(compilationOptions));
                 });
 
                 // Check if no-default-lib flag is false and if so add default library
@@ -320,11 +320,6 @@ namespace FourSlash {
                 PlaceOpenBraceOnNewLineForFunctions: false,
                 PlaceOpenBraceOnNewLineForControlBlocks: false,
             };
-
-            this.testData.files.forEach(file => {
-                const fileName = file.fileName.replace(Harness.IO.directoryName(file.fileName), "").substr(1);
-                const fileNameWithoutExtension = fileName.substr(0, fileName.lastIndexOf("."));
-            });
 
             // Open the first file by default
             this.openFile(0);
@@ -511,6 +506,15 @@ namespace FourSlash {
             const actual = emit.outputFiles[0].text;
             if (actual !== expected) {
                 this.raiseError(`Expected emit output to be "${expected}", but got "${actual}"`);
+            }
+        }
+
+        public verifyGetEmitOutputContentsForCurrentFile(expected: ts.OutputFile[]): void {
+            const emit = this.languageService.getEmitOutput(this.activeFile.fileName);
+            assert.equal(emit.outputFiles.length, expected.length, "Number of emit output files");
+            for (let i = 0; i < emit.outputFiles.length; i++) {
+                assert.equal(emit.outputFiles[i].name, expected[i].name, "FileName");
+                assert.equal(emit.outputFiles[i].text, expected[i].text, "Content");
             }
         }
 
@@ -753,10 +757,6 @@ namespace FourSlash {
             return this.languageService.getReferencesAtPosition(this.activeFile.fileName, this.currentCaretPosition);
         }
 
-        private assertionMessage(name: string, actualValue: any, expectedValue: any) {
-            return "\nActual " + name + ":\n\t" + actualValue + "\nExpected value:\n\t" + expectedValue;
-        }
-
         public getSyntacticDiagnostics(expected: string) {
             const diagnostics = this.languageService.getSyntacticDiagnostics(this.activeFile.fileName);
             this.testDiagnostics(expected, diagnostics);
@@ -901,7 +901,6 @@ namespace FourSlash {
         }
 
         public verifyCurrentParameterSpanIs(parameter: string) {
-            const activeSignature = this.getActiveSignatureHelpItem();
             const activeParameter = this.getActiveParameter();
             assert.equal(ts.displayPartsToString(activeParameter.displayParts), parameter);
         }
@@ -1153,7 +1152,7 @@ namespace FourSlash {
 
         public printCurrentQuickInfo() {
             const quickInfo = this.languageService.getQuickInfoAtPosition(this.activeFile.fileName, this.currentCaretPosition);
-            Harness.IO.log(JSON.stringify(quickInfo));
+            Harness.IO.log("Quick Info: " + quickInfo.displayParts.map(part => part.text).join(""));
         }
 
         public printErrorList() {
@@ -1195,12 +1194,26 @@ namespace FourSlash {
 
         public printMemberListMembers() {
             const members = this.getMemberListAtCaret();
-            Harness.IO.log(JSON.stringify(members));
+            this.printMembersOrCompletions(members);
         }
 
         public printCompletionListMembers() {
             const completions = this.getCompletionListAtCaret();
-            Harness.IO.log(JSON.stringify(completions));
+            this.printMembersOrCompletions(completions);
+        }
+
+        private printMembersOrCompletions(info: ts.CompletionInfo) {
+            function pad(s: string, length: number) {
+                return s + new Array(length - s.length + 1).join(" ");
+            }
+            function max<T>(arr: T[], selector: (x: T) => number): number {
+                return arr.reduce((prev, x) => Math.max(prev, selector(x)), 0);
+            }
+            const longestNameLength = max(info.entries, m => m.name.length);
+            const longestKindLength = max(info.entries, m => m.kind.length);
+            info.entries.sort((m, n) => m.sortText > n.sortText ? 1 : m.sortText < n.sortText ? -1 : m.name > n.name ? 1 : m.name < n.name ? -1 : 0);
+            const membersString = info.entries.map(m => `${pad(m.name, longestNameLength)} ${pad(m.kind, longestKindLength)} ${m.kindModifiers}`).join("\n");
+            Harness.IO.log(membersString);
         }
 
         public printReferences() {
@@ -2166,9 +2179,6 @@ namespace FourSlash {
         }
     }
 
-    // TOOD: should these just use the Harness's stdout/stderr?
-    const fsOutput = new Harness.Compiler.WriterAggregator();
-    const fsErrors = new Harness.Compiler.WriterAggregator();
     export function runFourSlashTest(basePath: string, testType: FourSlashTestType, fileName: string) {
         const content = Harness.IO.readFile(fileName);
         runFourSlashTestContent(basePath, testType, content, fileName);
@@ -2759,6 +2769,10 @@ namespace FourSlashInterface {
             this.state.verifyCompletionListItemsCountIsGreaterThan(count, this.negative);
         }
 
+        public assertHasRanges(ranges: FourSlash.Range[]) {
+            assert(ranges.length !== 0, "Array of ranges is expected to be non-empty");
+        }
+
         public completionListIsEmpty() {
             this.state.verifyCompletionListIsEmpty(this.negative);
         }
@@ -2860,6 +2874,10 @@ namespace FourSlashInterface {
 
         public verifyGetEmitOutputForCurrentFile(expected: string): void {
             this.state.verifyGetEmitOutputForCurrentFile(expected);
+        }
+
+        public verifyGetEmitOutputContentsForCurrentFile(expected: ts.OutputFile[]): void {
+            this.state.verifyGetEmitOutputContentsForCurrentFile(expected);
         }
 
         public currentParameterHelpArgumentNameIs(name: string) {

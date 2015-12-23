@@ -196,7 +196,7 @@ namespace ts {
                 }
                 if (node.name.kind === SyntaxKind.ComputedPropertyName) {
                     const nameExpression = (<ComputedPropertyName>node.name).expression;
-                    // treat computed property names where expression is string/numeric literal as just string/numeric literal 
+                    // treat computed property names where expression is string/numeric literal as just string/numeric literal
                     if (isStringOrNumericLiteral(nameExpression.kind)) {
                         return (<LiteralExpression>nameExpression).text;
                     }
@@ -222,8 +222,21 @@ namespace ts {
                 case SyntaxKind.ExportAssignment:
                     return (<ExportAssignment>node).isExportEquals ? "export=" : "default";
                 case SyntaxKind.BinaryExpression:
-                    // Binary expression case is for JS module 'module.exports = expr'
-                    return "export=";
+                    switch (getSpecialPropertyAssignmentKind(node)) {
+                        case SpecialPropertyAssignmentKind.ModuleExports:
+                            // module.exports = ...
+                            return "export=";
+                        case SpecialPropertyAssignmentKind.ExportsProperty:
+                        case SpecialPropertyAssignmentKind.ThisProperty:
+                            // exports.x = ... or this.y = ...
+                            return ((node as BinaryExpression).left as PropertyAccessExpression).name.text;
+                        case SpecialPropertyAssignmentKind.PrototypeProperty:
+                            // className.prototype.methodName = ...
+                            return (((node as BinaryExpression).left as PropertyAccessExpression).expression as PropertyAccessExpression).name.text;
+                    }
+                    Debug.fail("Unknown binary declaration kind");
+                    break;
+
                 case SyntaxKind.FunctionDeclaration:
                 case SyntaxKind.ClassDeclaration:
                     return node.flags & NodeFlags.Default ? "default" : undefined;
@@ -457,7 +470,7 @@ namespace ts {
 
         /**
          * Returns true if node and its subnodes were successfully traversed.
-         * Returning false means that node was not examined and caller needs to dive into the node himself. 
+         * Returning false means that node was not examined and caller needs to dive into the node himself.
          */
         function bindReachableStatement(node: Node): void {
             if (checkUnreachable(node)) {
@@ -567,7 +580,7 @@ namespace ts {
         }
 
         function bindIfStatement(n: IfStatement): void {
-            // denotes reachability state when entering 'thenStatement' part of the if statement: 
+            // denotes reachability state when entering 'thenStatement' part of the if statement:
             // i.e. if condition is false then thenStatement is unreachable
             const ifTrueState = n.expression.kind === SyntaxKind.FalseKeyword ? Reachability.Unreachable : currentReachabilityState;
             // denotes reachability state when entering 'elseStatement':
@@ -1166,11 +1179,25 @@ namespace ts {
                     return checkStrictModeIdentifier(<Identifier>node);
                 case SyntaxKind.BinaryExpression:
                     if (isInJavaScriptFile(node)) {
-                        if (isExportsPropertyAssignment(node)) {
-                            bindExportsPropertyAssignment(<BinaryExpression>node);
-                        }
-                        else if (isModuleExportsAssignment(node)) {
-                            bindModuleExportsAssignment(<BinaryExpression>node);
+                        const specialKind = getSpecialPropertyAssignmentKind(node);
+                        switch (specialKind) {
+                            case SpecialPropertyAssignmentKind.ExportsProperty:
+                                bindExportsPropertyAssignment(<BinaryExpression>node);
+                                break;
+                            case SpecialPropertyAssignmentKind.ModuleExports:
+                                bindModuleExportsAssignment(<BinaryExpression>node);
+                                break;
+                            case SpecialPropertyAssignmentKind.PrototypeProperty:
+                                bindPrototypePropertyAssignment(<BinaryExpression>node);
+                                break;
+                            case SpecialPropertyAssignmentKind.ThisProperty:
+                                bindThisPropertyAssignment(<BinaryExpression>node);
+                                break;
+                            case SpecialPropertyAssignmentKind.None:
+                                // Nothing to do
+                                break;
+                            default:
+                                Debug.fail("Unknown special property assignment kind");
                         }
                     }
                     return checkStrictModeBinaryExpression(<BinaryExpression>node);
@@ -1186,10 +1213,11 @@ namespace ts {
                     return checkStrictModePrefixUnaryExpression(<PrefixUnaryExpression>node);
                 case SyntaxKind.WithStatement:
                     return checkStrictModeWithStatement(<WithStatement>node);
-                case SyntaxKind.ThisKeyword:
+                case SyntaxKind.ThisType:
                     seenThisKeyword = true;
                     return;
-
+                case SyntaxKind.TypePredicate:
+                    return checkTypePredicate(node as TypePredicateNode);
                 case SyntaxKind.TypeParameter:
                     return declareSymbolAndAddToSymbolTable(<Declaration>node, SymbolFlags.TypeParameter, SymbolFlags.TypeParameterExcludes);
                 case SyntaxKind.Parameter:
@@ -1275,6 +1303,17 @@ namespace ts {
             }
         }
 
+        function checkTypePredicate(node: TypePredicateNode) {
+            const { parameterName, type } = node;
+            if (parameterName && parameterName.kind === SyntaxKind.Identifier) {
+                checkStrictModeIdentifier(parameterName as Identifier);
+            }
+            if (parameterName && parameterName.kind === SyntaxKind.ThisType) {
+                seenThisKeyword = true;
+            }
+            bind(type);
+        }
+
         function bindSourceFileIfExternalModule() {
             setExportContextFlag(file);
             if (isExternalModule(file)) {
@@ -1337,6 +1376,34 @@ namespace ts {
             // 'module.exports = expr' assignment
             setCommonJsModuleIndicator(node);
             bindExportAssignment(node);
+        }
+
+        function bindThisPropertyAssignment(node: BinaryExpression) {
+            // Declare a 'member' in case it turns out the container was an ES5 class
+            if (container.kind === SyntaxKind.FunctionExpression || container.kind === SyntaxKind.FunctionDeclaration) {
+                container.symbol.members = container.symbol.members || {};
+                declareSymbol(container.symbol.members, container.symbol, node, SymbolFlags.Property, SymbolFlags.PropertyExcludes);
+            }
+        }
+
+        function bindPrototypePropertyAssignment(node: BinaryExpression) {
+            // We saw a node of the form 'x.prototype.y = z'. Declare a 'member' y on x if x was a function.
+
+            // Look up the function in the local scope, since prototype assignments should
+            // follow the function declaration
+            const classId = <Identifier>(<PropertyAccessExpression>(<PropertyAccessExpression>node.left).expression).expression;
+            const funcSymbol = container.locals[classId.text];
+            if (!funcSymbol || !(funcSymbol.flags & SymbolFlags.Function)) {
+                return;
+            }
+
+            // Set up the members collection if it doesn't exist already
+            if (!funcSymbol.members) {
+                funcSymbol.members = {};
+            }
+
+            // Declare the method/property
+            declareSymbol(funcSymbol.members, funcSymbol, <PropertyAccessExpression>node.left, SymbolFlags.Property, SymbolFlags.PropertyExcludes);
         }
 
         function bindCallExpression(node: CallExpression) {
@@ -1432,10 +1499,7 @@ namespace ts {
 
             // If this is a property-parameter, then also declare the property symbol into the
             // containing class.
-            if (node.flags & NodeFlags.AccessibilityModifier &&
-                node.parent.kind === SyntaxKind.Constructor &&
-                isClassLike(node.parent.parent)) {
-
+            if (isParameterPropertyDeclaration(node)) {
                 const classDeclaration = <ClassLikeDeclaration>node.parent.parent;
                 declareSymbol(classDeclaration.symbol.members, classDeclaration.symbol, node, SymbolFlags.Property, SymbolFlags.PropertyExcludes);
             }
@@ -1535,7 +1599,7 @@ namespace ts {
 
                         // unreachable code is reported if
                         // - user has explicitly asked about it AND
-                        // - statement is in not ambient context (statements in ambient context is already an error 
+                        // - statement is in not ambient context (statements in ambient context is already an error
                         //   so we should not report extras) AND
                         //   - node is not variable statement OR
                         //   - node is block scoped variable statement OR

@@ -31,7 +31,6 @@
 // this will work in the browser via browserify
 var _chai: typeof chai = require("chai");
 var assert: typeof _chai.assert = _chai.assert;
-var expect: typeof _chai.expect = _chai.expect;
 declare var __dirname: string; // Node-specific
 var global = <any>Function("return this").call(null);
 /* tslint:enable:no-var-keyword */
@@ -176,7 +175,9 @@ namespace Utils {
             ts.forEachChild(node, child => { childNodesAndArrays.push(child); }, array => { childNodesAndArrays.push(array); });
 
             for (const childName in node) {
-                if (childName === "parent" || childName === "nextContainer" || childName === "modifiers" || childName === "externalModuleIndicator") {
+                if (childName === "parent" || childName === "nextContainer" || childName === "modifiers" || childName === "externalModuleIndicator" ||
+                    // for now ignore jsdoc comments
+                    childName === "jsDocComment") {
                     continue;
                 }
                 const child = (<any>node)[childName];
@@ -511,7 +512,6 @@ namespace Harness {
                 }
 
                 const folder: any = fso.GetFolder(path);
-                const paths: string[] = [];
 
                 return filesInFolder(folder, path);
             };
@@ -615,7 +615,6 @@ namespace Harness {
             export const getExecutingFilePath = () => "";
             export const exit = (exitCode: number) => {};
 
-            const supportsCodePage = () => false;
             export let log = (s: string) => console.log(s);
 
             namespace Http {
@@ -625,18 +624,6 @@ namespace Harness {
                 }
 
                 /// Ask the server to use node's path.resolve to resolve the given path
-                function getResolvedPathFromServer(path: string) {
-                    const xhr = new XMLHttpRequest();
-                    try {
-                        xhr.open("GET", path + "?resolve", /*async*/ false);
-                        xhr.send();
-                    }
-                    catch (e) {
-                        return { status: 404, responseText: null };
-                    }
-
-                    return waitForXHR(xhr);
-                }
 
                 export interface XHRResponse {
                     status: number;
@@ -906,6 +893,7 @@ namespace Harness {
             useCaseSensitiveFileNames?: boolean;
             includeBuiltFile?: string;
             baselineFile?: string;
+            libFiles?: string;
         }
 
         // Additional options not already in ts.optionDeclarations 
@@ -915,6 +903,7 @@ namespace Harness {
             { name: "baselineFile", type: "string" },
             { name: "includeBuiltFile", type: "string" },
             { name: "fileName", type: "string" },
+            { name: "libFiles", type: "string" },
             { name: "noErrorTruncation", type: "boolean" }
         ];
 
@@ -993,14 +982,11 @@ namespace Harness {
             currentDirectory = currentDirectory || Harness.IO.getCurrentDirectory();
 
             // Parse settings
-            let useCaseSensitiveFileNames = Harness.IO.useCaseSensitiveFileNames();
             if (harnessSettings) {
                 setCompilerOptionsFromHarnessSetting(harnessSettings, options);
             }
-            if (options.useCaseSensitiveFileNames !== undefined) {
-                useCaseSensitiveFileNames = options.useCaseSensitiveFileNames;
-            }
 
+            const useCaseSensitiveFileNames = options.useCaseSensitiveFileNames !== undefined ? options.useCaseSensitiveFileNames : Harness.IO.useCaseSensitiveFileNames();
             const programFiles: TestFile[] = inputFiles.slice();
             // Files from built\local that are requested by test "@includeBuiltFiles" to be in the context.
             // Treat them as library files, so include them in build, but not in baselines.
@@ -1015,6 +1001,15 @@ namespace Harness {
 
             const fileOutputs: GeneratedFile[] = [];
 
+            // Files from tests\lib that are requested by "@libFiles"
+            if (options.libFiles) {
+                for (const fileName of options.libFiles.split(",")) {
+                    const libFileName = "tests/lib/" + fileName;
+                    programFiles.push({ unitName: libFileName, content: normalizeLineEndings(IO.readFile(libFileName), Harness.IO.newLine()) });
+                }
+            }
+
+
             const programFileNames = programFiles.map(file => file.unitName);
 
             const compilerHost = createCompilerHost(
@@ -1028,7 +1023,7 @@ namespace Harness {
 
             const emitResult = program.emit();
 
-            const errors = ts.getPreEmitDiagnostics(program).concat(emitResult.diagnostics);
+            const errors = ts.getPreEmitDiagnostics(program);
 
             const result = new CompilerResult(fileOutputs, errors, program, Harness.IO.getCurrentDirectory(), emitResult.sourceMaps);
             return { result, options };
@@ -1053,7 +1048,6 @@ namespace Harness {
                 ts.forEach(inputFiles, file => addDtsFile(file, declInputFiles));
                 ts.forEach(otherFiles, file => addDtsFile(file, declOtherFiles));
                 const output = compileFiles(declInputFiles, declOtherFiles, harnessSettings, options, currentDirectory);
-
                 return { declInputFiles, declOtherFiles, declResult: output.result };
             }
 
@@ -1075,7 +1069,7 @@ namespace Harness {
                 // Is this file going to be emitted separately
                 let sourceFileName: string;
                 const outFile = options.outFile || options.out;
-                if (ts.isExternalModule(sourceFile) || !outFile) {
+                if (!outFile) {
                     if (options.outDir) {
                         let sourceFilePath = ts.getNormalizedAbsolutePath(sourceFile.fileName, result.currentDirectoryForProgram);
                         sourceFilePath = sourceFilePath.replace(result.program.getCommonSourceDirectory(), "");
@@ -1438,7 +1432,7 @@ namespace Harness {
             }
 
             // normalize the fileName for the single file case
-            currentFileName = testUnitData.length > 0 ? currentFileName : Path.getFileName(fileName);
+            currentFileName = testUnitData.length > 0 || currentFileName ? currentFileName : Path.getFileName(fileName);
 
             // EOF, push whatever remains
             const newTestFile2 = {
@@ -1557,7 +1551,7 @@ namespace Harness {
             const encoded_actual =  Utils.encodeString(actual);
             if (expected != encoded_actual) {
                 // Overwrite & issue error
-                const errMsg = "The baseline file " + relativeFileName + " has changed";
+                const errMsg = "The baseline file " + relativeFileName + " has changed.";
                 throw new Error(errMsg);
             }
         }

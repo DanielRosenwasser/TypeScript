@@ -206,6 +206,8 @@ namespace ts {
         UnionType,
         IntersectionType,
         ParenthesizedType,
+        ThisType,
+        StringLiteralType,
         // Binding patterns
         ObjectBindingPattern,
         ArrayBindingPattern,
@@ -351,7 +353,7 @@ namespace ts {
         FirstFutureReservedWord = ImplementsKeyword,
         LastFutureReservedWord = YieldKeyword,
         FirstTypeNode = TypePredicate,
-        LastTypeNode = ParenthesizedType,
+        LastTypeNode = StringLiteralType,
         FirstPunctuation = OpenBraceToken,
         LastPunctuation = CaretEqualsToken,
         FirstToken = Unknown,
@@ -439,12 +441,16 @@ namespace ts {
 
     export const enum JsxFlags {
         None = 0,
+        /** An element from a named property of the JSX.IntrinsicElements interface */
         IntrinsicNamedElement = 1 << 0,
+        /** An element inferred from the string index signature of the JSX.IntrinsicElements interface */
         IntrinsicIndexedElement = 1 << 1,
-        ClassElement = 1 << 2,
-        UnknownElement = 1 << 3,
+        /** An element backed by a class, class-like, or function value */
+        ValueElement = 1 << 2,
+        /** Element resolution failed */
+        UnknownElement = 1 << 4,
 
-        IntrinsicElement = IntrinsicNamedElement | IntrinsicIndexedElement
+        IntrinsicElement = IntrinsicNamedElement | IntrinsicIndexedElement,
     }
 
 
@@ -587,6 +593,7 @@ namespace ts {
         name: PropertyName;                 // Declared property name
         questionToken?: Node;               // Present on optional property
         type?: TypeNode;                    // Optional type annotation
+        initializer?: Expression;           // Optional initializer
     }
 
     // @kind(SyntaxKind.PropertyDeclaration)
@@ -739,6 +746,11 @@ namespace ts {
         _typeNodeBrand: any;
     }
 
+    // @kind(SyntaxKind.ThisType)
+    export interface ThisTypeNode extends TypeNode {
+        _thisTypeNodeBrand: any;
+    }
+
     export interface FunctionOrConstructorTypeNode extends TypeNode, SignatureDeclaration {
         _functionOrConstructorTypeNodeBrand: any;
     }
@@ -757,7 +769,7 @@ namespace ts {
 
     // @kind(SyntaxKind.TypePredicate)
     export interface TypePredicateNode extends TypeNode {
-        parameterName: Identifier;
+        parameterName: Identifier | ThisTypeNode;
         type: TypeNode;
     }
 
@@ -797,10 +809,13 @@ namespace ts {
         type: TypeNode;
     }
 
-    // Note that a StringLiteral AST node is both an Expression and a TypeNode.  The latter is
-    // because string literals can appear in type annotations as well.
+    // @kind(SyntaxKind.StringLiteralType)
+    export interface StringLiteralTypeNode extends LiteralLikeNode, TypeNode {
+        _stringLiteralTypeBrand: any;
+    }
+
     // @kind(SyntaxKind.StringLiteral)
-    export interface StringLiteral extends LiteralExpression, TypeNode {
+    export interface StringLiteral extends LiteralExpression {
         _stringLiteralBrand: any;
     }
 
@@ -918,24 +933,32 @@ namespace ts {
         body: ConciseBody;
     }
 
+    export interface LiteralLikeNode extends Node {
+        text: string;
+        isUnterminated?: boolean;
+        hasExtendedUnicodeEscape?: boolean;
+    }
+
     // The text property of a LiteralExpression stores the interpreted value of the literal in text form. For a StringLiteral,
     // or any literal of a template, this means quotes have been removed and escapes have been converted to actual characters.
     // For a NumericLiteral, the stored value is the toString() representation of the number. For example 1, 1.00, and 1e0 are all stored as just "1".
     // @kind(SyntaxKind.NumericLiteral)
     // @kind(SyntaxKind.RegularExpressionLiteral)
     // @kind(SyntaxKind.NoSubstitutionTemplateLiteral)
+    export interface LiteralExpression extends LiteralLikeNode, PrimaryExpression {
+        _literalExpressionBrand: any;
+    }
+
     // @kind(SyntaxKind.TemplateHead)
     // @kind(SyntaxKind.TemplateMiddle)
     // @kind(SyntaxKind.TemplateTail)
-    export interface LiteralExpression extends PrimaryExpression {
-        text: string;
-        isUnterminated?: boolean;
-        hasExtendedUnicodeEscape?: boolean;
+    export interface TemplateLiteralFragment extends LiteralLikeNode {
+        _templateLiteralFragmentBrand: any;
     }
 
     // @kind(SyntaxKind.TemplateExpression)
     export interface TemplateExpression extends PrimaryExpression {
-        head: LiteralExpression;
+        head: TemplateLiteralFragment;
         templateSpans: NodeArray<TemplateSpan>;
     }
 
@@ -944,7 +967,7 @@ namespace ts {
     // @kind(SyntaxKind.TemplateSpan)
     export interface TemplateSpan extends Node {
         expression: Expression;
-        literal: LiteralExpression;
+        literal: TemplateLiteralFragment;
     }
 
     // @kind(SyntaxKind.ParenthesizedExpression)
@@ -1084,7 +1107,6 @@ namespace ts {
     export interface DebuggerStatement extends Statement { }
 
     // @kind(SyntaxKind.MissingDeclaration)
-    // @factoryhidden("name", true)
     export interface MissingDeclaration extends DeclarationStatement, ClassElement, ObjectLiteralElement, TypeElement {
         name?: Identifier;
     }
@@ -1182,7 +1204,7 @@ namespace ts {
 
     // @kind(SyntaxKind.CaseClause)
     export interface CaseClause extends Node {
-        expression?: Expression;
+        expression: Expression;
         statements: NodeArray<Statement>;
     }
 
@@ -1241,7 +1263,6 @@ namespace ts {
     export interface TypeElement extends Declaration {
         _typeElementBrand: any;
         name?: PropertyName;
-        // @factoryparam
         questionToken?: Node;
     }
 
@@ -1711,6 +1732,7 @@ namespace ts {
 
         getSymbolsInScope(location: Node, meaning: SymbolFlags): Symbol[];
         getSymbolAtLocation(node: Node): Symbol;
+        getSymbolsOfParameterPropertyDeclaration(parameter: ParameterDeclaration, parameterName: string): Symbol[];
         getShorthandAssignmentValueSymbol(location: Node): Symbol;
         getTypeAtLocation(node: Node): Type;
         typeToString(type: Type, enclosingDeclaration?: Node, flags?: TypeFormatFlags): string;
@@ -1749,7 +1771,7 @@ namespace ts {
     export interface SymbolDisplayBuilder {
         buildTypeDisplay(type: Type, writer: SymbolWriter, enclosingDeclaration?: Node, flags?: TypeFormatFlags): void;
         buildSymbolDisplay(symbol: Symbol, writer: SymbolWriter, enclosingDeclaration?: Node, meaning?: SymbolFlags, flags?: SymbolFormatFlags): void;
-        buildSignatureDisplay(signatures: Signature, writer: SymbolWriter, enclosingDeclaration?: Node, flags?: TypeFormatFlags): void;
+        buildSignatureDisplay(signatures: Signature, writer: SymbolWriter, enclosingDeclaration?: Node, flags?: TypeFormatFlags, kind?: SignatureKind): void;
         buildParameterDisplay(parameter: Symbol, writer: SymbolWriter, enclosingDeclaration?: Node, flags?: TypeFormatFlags): void;
         buildTypeParameterDisplay(tp: TypeParameter, writer: SymbolWriter, enclosingDeclaration?: Node, flags?: TypeFormatFlags): void;
         buildTypeParameterDisplayFromSymbol(symbol: Symbol, writer: SymbolWriter, enclosingDeclaraiton?: Node, flags?: TypeFormatFlags): void;
@@ -1812,10 +1834,25 @@ namespace ts {
         CannotBeNamed
     }
 
+    export const enum TypePredicateKind {
+        This,
+        Identifier
+    }
+
     export interface TypePredicate {
+        kind: TypePredicateKind;
+        type: Type;
+    }
+
+    // @kind (TypePredicateKind.This)
+    export interface ThisTypePredicate extends TypePredicate {
+        _thisTypePredicateBrand: any;
+    }
+
+    // @kind (TypePredicateKind.Identifier)
+    export interface IdentifierTypePredicate extends TypePredicate {
         parameterName: string;
         parameterIndex: number;
-        type: Type;
     }
 
     /* @internal */
@@ -1879,6 +1916,7 @@ namespace ts {
         getReferencedValueDeclaration(reference: Identifier): Declaration;
         getTypeReferenceSerializationKind(typeName: EntityName): TypeReferenceSerializationKind;
         isOptionalParameter(node: ParameterDeclaration): boolean;
+        moduleExportsSomeValue(moduleReferenceExpression: Expression): boolean;
         isArgumentsLocalBinding(node: Identifier): boolean;
         getExternalModuleFileFromDeclaration(declaration: ImportEqualsDeclaration | ImportDeclaration | ExportDeclaration): SourceFile;
     }
@@ -1989,6 +2027,7 @@ namespace ts {
         type?: Type;                        // Type of value symbol
         declaredType?: Type;                // Type of class, interface, enum, type alias, or type parameter
         typeParameters?: TypeParameter[];   // Type parameters of type alias (undefined if non-generic)
+        inferredClassType?: Type;           // Type of an inferred ES5 class
         instantiations?: Map<Type>;         // Instantiations of generic type alias (undefined if non-generic)
         mapper?: TypeMapper;                // Type mapper for instantiation alias
         referenced?: boolean;               // True if alias symbol has been referenced as a value
@@ -1997,6 +2036,7 @@ namespace ts {
         exportsChecked?: boolean;           // True if exports of external module have been checked
         isNestedRedeclaration?: boolean;    // True if symbol is block scoped redeclaration
         bindingElement?: BindingElement;    // Binding element associated with property symbol
+        exportsSomeValue?: boolean;         // true if module exports some value (not just types)
     }
 
     /* @internal */
@@ -2037,7 +2077,6 @@ namespace ts {
         resolvedSymbol?: Symbol;          // Cached name resolution result
         flags?: NodeCheckFlags;           // Set of flags specific to Node
         enumMemberValue?: number;         // Constant value of enum member
-        isIllegalTypeReferenceInConstraint?: boolean; // Is type reference in constraint refers to the type parameter from the same list
         isVisible?: boolean;              // Is this node visible
         generatedName?: string;           // Generated name for module, enum, or import declaration
         generatedNames?: Map<string>;     // Generated names table for source file
@@ -2081,6 +2120,7 @@ namespace ts {
         ESSymbol                = 0x01000000,  // Type of symbol primitive introduced in ES6
         ThisType                = 0x02000000,  // This type
         ObjectLiteralPatternWithComputedProperties = 0x04000000,  // Object literal type implied by binding pattern has computed properties
+        PredicateType           = 0x08000000,  // Predicate types are also Boolean types, but should not be considered Intrinsics - there's no way to capture this with flags
 
         /* @internal */
         Intrinsic = Any | String | Number | Boolean | ESSymbol | Void | Undefined | Null,
@@ -2092,7 +2132,7 @@ namespace ts {
         UnionOrIntersection = Union | Intersection,
         StructuredType = ObjectType | Union | Intersection,
         /* @internal */
-        RequiresWidening = ContainsUndefinedOrNull | ContainsObjectLiteral,
+        RequiresWidening = ContainsUndefinedOrNull | ContainsObjectLiteral | PredicateType,
         /* @internal */
         PropagatingFlags = ContainsUndefinedOrNull | ContainsObjectLiteral | ContainsAnyFunctionType
     }
@@ -2111,6 +2151,11 @@ namespace ts {
     // Intrinsic types (TypeFlags.Intrinsic)
     export interface IntrinsicType extends Type {
         intrinsicName: string;  // Name of intrinsic type
+    }
+
+    // Predicate types (TypeFlags.Predicate)
+    export interface PredicateType extends Type {
+        predicate: ThisTypePredicate | IdentifierTypePredicate;
     }
 
     // String literal types (TypeFlags.StringLiteral)
@@ -2229,7 +2274,6 @@ namespace ts {
         declaration: SignatureDeclaration;  // Originating declaration
         typeParameters: TypeParameter[];    // Type parameters (undefined if non-generic)
         parameters: Symbol[];               // Parameters
-        typePredicate?: TypePredicate;      // Type predicate
         /* @internal */
         resolvedReturnType: Type;           // Resolved return type
         /* @internal */
@@ -2278,8 +2322,22 @@ namespace ts {
         inferUnionTypes: boolean;           // Infer union types for disjoint candidates (otherwise undefinedType)
         inferences: TypeInferences[];       // Inferences made for each type parameter
         inferredTypes: Type[];              // Inferred type for each type parameter
+        mapper?: TypeMapper;                // Type mapper for this inference context
         failedTypeParameterIndex?: number;  // Index of type parameter for which inference failed
         // It is optional because in contextual signature instantiation, nothing fails
+    }
+
+    /* @internal */
+    export const enum SpecialPropertyAssignmentKind {
+        None,
+        /// exports.name = expr
+        ExportsProperty,
+        /// module.exports = expr
+        ModuleExports,
+        /// className.prototype.name = expr
+        PrototypeProperty,
+        /// this.name = expr
+        ThisProperty
     }
 
     export interface DiagnosticMessage {
@@ -2369,6 +2427,8 @@ namespace ts {
         noImplicitReturns?: boolean;
         noFallthroughCasesInSwitch?: boolean;
         forceConsistentCasingInFileNames?: boolean;
+        allowSyntheticDefaultImports?: boolean;
+        allowJs?: boolean;
         /* @internal */ stripInternal?: boolean;
 
         // Skip checking lib.d.ts to help speed up tests.
