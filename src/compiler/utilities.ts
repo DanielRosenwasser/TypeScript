@@ -1883,6 +1883,16 @@ namespace ts {
         return undefined;
     }
 
+    export function getAncestorWhere(node: Node | undefined, predicate: (x: Node) => boolean): Node | undefined {
+        while (node) {
+            if (predicate(node)) {
+                return node;
+            }
+            node = node.parent;
+        }
+        return undefined;
+    }
+
     export function getFileReferenceFromReferencePath(comment: string, commentRange: CommentRange): ReferencePathMatchResult {
         const simpleReferenceRegEx = /^\/\/\/\s*<reference\s+/gim;
         const isNoDefaultLibRegEx = /^(\/\/\/\s*<reference\s+no-default-lib\s*=\s*)('|")(.+?)\2\s*\/>/gim;

@@ -5,6 +5,7 @@
 /// <reference path="fixConstructorForDerivedNeedSuperCall.ts" />
 /// <reference path="fixExtendsInterfaceBecomesImplements.ts" />
 /// <reference path="fixForgottenThisPropertyAccess.ts" />
+/// <reference path="fixPropTypes.ts" />
 /// <reference path='unusedIdentifierFixes.ts' />
 /// <reference path='importFixes.ts' />
 /// <reference path='disableJsDiagnostics.ts' />

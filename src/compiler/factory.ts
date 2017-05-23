@@ -303,7 +303,7 @@ namespace ts {
             : node;
     }
 
-    export function createTypeReferenceNode(typeName: string | EntityName, typeArguments: TypeNode[] | undefined) {
+    export function createTypeReferenceNode(typeName: string | EntityName, typeArguments?: TypeNode[] | undefined) {
         const typeReference = createSynthesizedNode(SyntaxKind.TypeReference) as TypeReferenceNode;
         typeReference.typeName = asName(typeName);
         typeReference.typeArguments = asNodeArray(typeArguments);
